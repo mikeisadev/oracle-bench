@@ -1,0 +1,31 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: oracle-bench
+
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: tuner
+    password: Corso2026#
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      pool-name: oracle-bench-pool
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 10000
+
+  # Run schema.sql at startup to (re)create bench_customers.
+  # continue-on-error lets restarts succeed even if the table already exists.
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      schema-locations: classpath:schema.sql
+
+logging:
+  level:
+    com.example.oraclebench: INFO
+    # Uncomment to inspect the raw Hikari pool lifecycle
+    # com.zaxxer.hikari: DEBUG

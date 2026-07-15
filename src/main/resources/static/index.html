@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>oracle-bench</title>
+    <style>
+        :root { color-scheme: light dark; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            margin: 0; padding: 24px; line-height: 1.4;
+        }
+        h1 { margin: 0 0 4px; font-size: 1.4rem; }
+        .sub { opacity: 0.7; margin: 0 0 20px; font-size: 0.9rem; }
+        .controls {
+            display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+            margin-bottom: 8px;
+        }
+        select, button, input {
+            font-size: 0.95rem; padding: 8px 12px; border-radius: 6px;
+            border: 1px solid #8886; background: #8881; color: inherit;
+        }
+        button { cursor: pointer; }
+        button:disabled { opacity: 0.5; cursor: default; }
+        button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        #param { width: 180px; }
+        .sqlbox {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.8rem; white-space: pre-wrap; opacity: 0.75;
+            margin: 6px 0 18px; min-height: 1.2em;
+        }
+        table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+        th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #8883; }
+        th { position: sticky; top: 0; background: #8882; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+        tr.min td.ms { background: #16a34a; color: #fff; border-radius: 3px; }
+        tr.max td.ms { background: #dc2626; color: #fff; border-radius: 3px; }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 6px; }
+        .toolbar button { font-size: 0.85rem; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>oracle-bench</h1>
+    <p class="sub">Esegui le query predefinite e confronta i tempi. Verde = più veloce, rosso = più lento.</p>
+
+    <div class="controls">
+        <label>Query:
+            <select id="querySelect"></select>
+        </label>
+        <input id="param" type="text" placeholder="parametro p (opzionale)">
+        <button class="primary" id="runOnce">Esegui</button>
+        <button id="runTen">Esegui 10 volte</button>
+    </div>
+    <div class="sqlbox" id="sqlPreview"></div>
+
+    <div class="toolbar">
+        <strong>Risultati</strong>
+        <button id="clear">Svuota</button>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th><th>Query</th><th>Righe</th><th>ms</th><th>sql_id</th>
+            </tr>
+        </thead>
+        <tbody id="results"></tbody>
+    </table>
+
+    <script>
+        const select = document.getElementById('querySelect');
+        const paramInput = document.getElementById('param');
+        const sqlPreview = document.getElementById('sqlPreview');
+        const resultsBody = document.getElementById('results');
+        const runOnce = document.getElementById('runOnce');
+        const runTen = document.getElementById('runTen');
+        const clearBtn = document.getElementById('clear');
+
+        let queries = {};   // id -> sql
+        let counter = 0;
+
+        async function loadQueries() {
+            const res = await fetch('/api/queries');
+            const list = await res.json();
+            select.innerHTML = '';
+            list.forEach(q => {
+                queries[q.id] = q.sql;
+                const opt = document.createElement('option');
+                opt.value = q.id;
+                const firstLine = q.sql.split('\n')[0];
+                opt.textContent = `#${q.id} — ${firstLine.slice(0, 60)}`;
+                select.appendChild(opt);
+            });
+            showPreview();
+        }
+
+        function showPreview() {
+            sqlPreview.textContent = queries[select.value] || '';
+        }
+
+        function setBusy(busy) {
+            runOnce.disabled = busy;
+            runTen.disabled = busy;
+        }
+
+        async function runQuery() {
+            const id = select.value;
+            const p = paramInput.value;
+            let url = `/api/query?id=${encodeURIComponent(id)}`;
+            if (p !== '') url += `&p=${encodeURIComponent(p)}`;
+
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!res.ok) {
+                addRow({ id, rows: '—', elapsedMs: null, sqlId: 'ERRORE: ' + (data.error || res.status) });
+                return;
+            }
+            addRow(data);
+        }
+
+        function addRow(data) {
+            const tr = document.createElement('tr');
+            const ms = (data.elapsedMs === null || data.elapsedMs === undefined)
+                ? '—' : Number(data.elapsedMs).toFixed(3);
+            tr.dataset.ms = (data.elapsedMs === null || data.elapsedMs === undefined) ? '' : data.elapsedMs;
+            tr.innerHTML = `
+                <td class="num">${++counter}</td>
+                <td>#${data.id}</td>
+                <td class="num">${data.rows}</td>
+                <td class="num ms">${ms}</td>
+                <td class="mono">${data.sqlId || ''}</td>`;
+            resultsBody.appendChild(tr);
+            highlightExtremes();
+        }
+
+        function highlightExtremes() {
+            const rows = [...resultsBody.querySelectorAll('tr')].filter(r => r.dataset.ms !== '');
+            rows.forEach(r => r.classList.remove('min', 'max'));
+            if (rows.length < 2) return;
+            let min = rows[0], max = rows[0];
+            rows.forEach(r => {
+                const v = parseFloat(r.dataset.ms);
+                if (v < parseFloat(min.dataset.ms)) min = r;
+                if (v > parseFloat(max.dataset.ms)) max = r;
+            });
+            min.classList.add('min');
+            max.classList.add('max');
+        }
+
+        async function runN(n) {
+            setBusy(true);
+            try {
+                for (let i = 0; i < n; i++) {
+                    await runQuery();
+                }
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        select.addEventListener('change', showPreview);
+        runOnce.addEventListener('click', () => runN(1));
+        runTen.addEventListener('click', () => runN(10));
+        clearBtn.addEventListener('click', () => {
+            resultsBody.innerHTML = '';
+            counter = 0;
+        });
+
+        loadQueries();
+    </script>
+</body>
+</html>
