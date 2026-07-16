@@ -8,12 +8,14 @@ import * as schema from './schema.js';
 import * as custom from './custom.js';
 import * as tuning from './tuning.js';
 import { initGuide } from './guide.js';
+import { initSetup } from './setup.js';
 
 benchmark.init();
 schema.init();
 custom.init();
 tuning.init();
 initGuide();
+initSetup();
 
 // Each tab fetches its data only the first time it is opened.
 const loaded = { schema: false, custom: false, tuning: false };

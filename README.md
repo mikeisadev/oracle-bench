@@ -219,6 +219,77 @@ java -jar target/oracle-bench.jar
 
 ---
 
+## Setup automatico (pulsante «Avvia setup»)
+
+In alto a destra il pulsante **▶ Avvia setup** configura il database per il corso in
+un colpo solo. Apre un dialog che spiega cosa accadrà; se annulli non succede nulla, se
+confermi parte la procedura e vedrai **ogni comando in tempo reale** in un terminale
+(xterm.js) alimentato via Server-Sent Events. Il terminale occupa tutta la larghezza e
+ha un pulsante **Schermo intero** (accanto a *Chiudi*) per espanderlo e ridurlo.
+
+**Pre-flight**: alla conferma l'app verifica che il **container Docker sia attivo**
+(`GET /api/setup/status` → `docker inspect`). Se Docker non è raggiungibile o il
+container non è in esecuzione, compare un **dialog d'errore** con le istruzioni per
+avviarlo (le due strade qui sotto) invece di far partire il setup.
+
+Cosa fa il setup (via `docker exec … sqlplus`, output con password mascherate):
+
+1. verifica connessione e versione del DB;
+2. crea l'utente **`tuner`** con i privilegi del corso (§6.5);
+3. concede lettura su dizionario/`V$` e sugli schemi **HR** e **SH** a `corso` e `tuner`;
+4. raccoglie le statistiche dell'ottimizzatore su HR e SH;
+5. `TRUNCATE` + carica i dati di test in `bench_customers` (+ statistiche);
+6. verifica finale.
+
+> Il setup **configura** l'accesso a HR/SH ma non li **installa** (devono già esistere;
+> SH richiede SQLcl — vedi [Installare gli schemi demo HR e SH](#installare-gli-schemi-demo-hr-e-sh)).
+
+### Funziona su entrambe le edizioni
+
+Sì: il setup usa `docker exec … sqlplus` con SQL standard, quindi vale sia per la
+**community gvenzl** sia per l'**Oracle 19c ufficiale**. Cambia solo la configurazione.
+
+**Strada A — community gvenzl** (service name `FREEPDB1`):
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: corso
+    password: Corso2026
+oracle-bench:
+  setup:
+    container: oracle-corso
+    service: FREEPDB1
+    system-password: Corso2026
+    app-password: Corso2026
+```
+
+**Strada B — Oracle 19c ufficiale** (service name `ORCLPDB1`, container diverso):
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/ORCLPDB1
+    username: corso
+    password: Corso2026
+oracle-bench:
+  setup:
+    container: oracle19c
+    service: ORCLPDB1
+    system-password: Corso2026
+    app-password: Corso2026
+```
+
+Le altre chiavi disponibili sotto `oracle-bench.setup`: `docker-path`, `system-user`,
+`app-user`, `tuner-user`, `tuner-password`, `seed-rows`.
+
+> ⚠️ Il setup lancia `docker` come sottoprocesso: **avvia l'app da un terminale** in cui
+> il comando `docker` è nel PATH (non da un launcher grafico che non erediti il PATH),
+> altrimenti il terminale mostrerà "Docker non raggiungibile".
+
+---
+
 ## Le dipendenze — `pom.xml`
 
 Spring Boot usa gli **starter**: dipendenze "ombrello" che tirano dentro un set
@@ -483,12 +554,12 @@ La UI (`/`) è organizzata in **tab**:
   minimo, rosso = massimo), la vista *Dati* mostra le righe dell'ultima esecuzione.
 - **Tabelle** — in cima la **checklist Dataset del corso** (HR, SH, copie di lavoro,
   progetto) con stato **verde/rosso**: verde = presente e visibile, rosso = mancante o
-  non visibile all'utente connesso. Sotto, l'elenco delle tabelle dell'utente e il
-  dettaglio con statistiche (righe da stats, dimensione, blocchi, avg row len, ultima
-  analisi), pulsanti **COUNT(\*) esatto** e **Aggiorna statistiche**, colonne e indici.
-  Lo switch **"Mostra tipi e caratteristiche colonne"** aggiunge tipo, nullabilità e
-  PK. Pannello per **generare N righe** in `bench_customers` e per **creare/eliminare
-  indici**.
+  non visibile all'utente connesso. Sotto, l'elenco di **tutte le tabelle visibili**
+  (il tuo schema + **HR** + **SH**): cliccandone una qualsiasi si apre lo stesso
+  dettaglio (statistiche, colonne, indici, **COUNT(\*) esatto**). Lo switch **"Mostra
+  tipi e caratteristiche colonne"** aggiunge tipo, nullabilità e PK. Le azioni di
+  scrittura (**Aggiorna statistiche**, **crea/elimina indice**, **genera N righe** in
+  `bench_customers`) sono attive solo sulle tabelle del tuo schema.
 - **Query custom** — scegli una tabella (tuo schema + HR + SH), spunta le colonne o
   usa **Tutte le colonne**, **Costruisci SELECT** e modifica la query a mano; solo
   query in lettura (SELECT/WITH, connessione read-only). Risultati con righe, ms e
@@ -544,9 +615,14 @@ Con `data=true` la risposta include anche i dati (fino a 500 righe materializzat
 | metodo | endpoint                                | descrizione |
 |--------|-----------------------------------------|-------------|
 | GET    | `/api/schema/datasets`                  | checklist HR/SH/copie/progetto: presente o mancante (+ num_rows) |
-| GET    | `/api/schema/tables`                    | tabelle dell'utente: righe (stats) e dimensione segmento |
-| GET    | `/api/schema/tables/{name}`             | dettaglio: statistiche, colonne, indici, PK |
-| GET    | `/api/schema/tables/{name}/count`       | `COUNT(*)` esatto (da contrapporre alle stats) |
+| GET    | `/api/schema/tables`                    | tabelle visibili (tuo schema + **HR** + **SH**), con owner |
+| GET    | `/api/schema/tables/{owner}/{name}`     | dettaglio: statistiche, colonne, indici, PK (`own` = tabella tua) |
+| GET    | `/api/schema/tables/{owner}/{name}/count` | `COUNT(*)` esatto (da contrapporre alle stats) |
+
+La scheda **Tabelle** elenca ora anche HR e SH: cliccando una qualsiasi tabella si apre
+lo stesso pannello di dettaglio (statistiche, colonne, indici, `COUNT(*)`). Le azioni di
+**scrittura** (crea/elimina indice, aggiorna statistiche) restano disponibili solo sulle
+tabelle del tuo schema; la dimensione segmento è nota solo per le tue tabelle.
 
 ### Query custom
 
@@ -558,8 +634,22 @@ Con `data=true` la risposta include anche i dati (fino a 500 righe materializzat
 
 Il runner custom accetta **un solo statement** SELECT/WITH, apre la connessione in
 read-only e rifiuta DML/DDL: è un editor didattico, non una console amministrativa.
-I comandi client di SQL\*Plus (`DESC`, `SET AUTOTRACE`, `SHOW`) non passano da JDBC —
-la Guida ne fornisce gli equivalenti SQL.
+
+Oltre alle SELECT, il runner riconosce e **traduce in SQL** alcuni comandi in stile
+SQL\*Plus/SQLcl utili a sviluppatori e DBA:
+
+| comando            | equivale a |
+|--------------------|-----------|
+| `DESC [schema.]tab` | struttura (colonne, tipo, NULL?) da `ALL_TAB_COLUMNS` |
+| `SHOW USER`        | `SELECT USER FROM dual` |
+| `SHOW CON_NAME`    | container/PDB corrente |
+| `SHOW PARAMETER [x]` | `V$PARAMETER` (filtra per nome) |
+| `SHOW PDBS`        | `V$PDBS` |
+| `SHOW TABLES`      | `USER_TABLES` |
+| `DDL oggetto`      | `DBMS_METADATA.GET_DDL(...)` |
+
+I comandi puramente client (`SET AUTOTRACE`, `SET TIMING`, ecc.) restano nella Guida
+con i loro equivalenti, perché non hanno senso via JDBC.
 
 Le "righe" in `/api/schema/tables` vengono da `USER_TABLES.NUM_ROWS`, cioè dalle
 **statistiche dell'ottimizzatore** (possono essere `null` o stantie); la

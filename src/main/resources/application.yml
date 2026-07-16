@@ -24,6 +24,21 @@ spring:
       continue-on-error: true
       schema-locations: classpath:schema.sql
 
+# One-click "Avvia setup" (pulsante in alto a destra). I valori sotto sono i default:
+# adattali all'edizione in uso (Strada B / 19c: container: oracle19c, service: ORCLPDB1).
+oracle-bench:
+  setup:
+    container: oracle-corso      # nome del container Docker
+    service: FREEPDB1            # service name / PDB (ORCLPDB1 sull'immagine 19c)
+    docker-path: docker         # percorso del CLI docker (dev'essere nel PATH dell'app)
+    system-user: system
+    system-password: Corso2026
+    app-user: corso
+    app-password: Corso2026
+    tuner-user: tuner
+    tuner-password: Corso2026#
+    seed-rows: 50000            # righe di test caricate in bench_customers
+
 logging:
   level:
     com.example.oraclebench: INFO

@@ -14,6 +14,7 @@ import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -73,10 +74,11 @@ public class CustomQueryService {
                                long rows, double elapsedMs, String sqlId, boolean truncated) {
     }
 
-    /** Executes a validated, read-only SELECT and returns rows + timing + sql_id. */
+    /** Executes a read-only SELECT (or a translated meta-command) and returns rows. */
     public CustomResult run(String rawSql) throws SQLException {
-        String sql = requireReadOnly(rawSql);
-        log.info("Custom query: {}", sql);
+        String meta = translateMeta(rawSql);
+        String sql = (meta != null) ? meta : requireReadOnly(rawSql);
+        log.info("Custom query{}: {}", meta != null ? " (meta)" : "", sql);
 
         try (Connection conn = dataSource.getConnection()) {
             boolean prevReadOnly = conn.isReadOnly();
@@ -122,6 +124,84 @@ public class CustomQueryService {
 
     // ---------- helpers ----------
 
+    // ---------- SQL*Plus / SQLcl style meta-commands (translated to SQL) ----------
+
+    private static final Pattern P_DESC = Pattern.compile("^(?:desc|describe)\\s+([A-Za-z0-9_$#.]+)\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_SHOW_USER = Pattern.compile("^show\\s+user\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_SHOW_CON = Pattern.compile("^show\\s+con_name\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_SHOW_PARAM = Pattern.compile("^show\\s+parameters?\\s*([A-Za-z0-9_$#]*)\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_SHOW_PDBS = Pattern.compile("^show\\s+pdbs\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_SHOW_TABLES = Pattern.compile("^(?:show\\s+tables|tables)\\s*;?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern P_DDL = Pattern.compile("^ddl\\s+([A-Za-z0-9_$#.]+)\\s*;?$", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Translates a handful of SQL*Plus/SQLcl client commands into runnable SQL so
+     * developers/DBAs can type them straight into the editor. Returns {@code null}
+     * when the input is not a recognized meta-command. Identifiers are validated and
+     * embedded as string literals (compared as data, never as SQL identifiers).
+     */
+    private String translateMeta(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String t = raw.strip();
+        Matcher m;
+
+        if ((m = P_DESC.matcher(t)).matches()) {
+            String[] on = ownerAndName(m.group(1));
+            String ownerPred = on[0] == null ? "owner = USER" : "owner = '" + on[0] + "'";
+            return """
+                    SELECT column_id AS "#", column_name AS "COLONNA",
+                      CASE WHEN data_type IN ('VARCHAR2','CHAR','NVARCHAR2','NCHAR','RAW')
+                             THEN data_type||'('||data_length||')'
+                           WHEN data_type='NUMBER' AND data_precision IS NOT NULL
+                             THEN data_type||'('||data_precision||CASE WHEN NVL(data_scale,0)>0 THEN ','||data_scale END||')'
+                           ELSE data_type END AS "TIPO",
+                      DECODE(nullable,'N','NOT NULL','') AS "NULL?"
+                    FROM all_tab_columns
+                    WHERE table_name = '%s' AND %s
+                    ORDER BY column_id"""
+                    .formatted(on[1], ownerPred);
+        }
+        if (P_SHOW_USER.matcher(t).matches()) {
+            return "SELECT USER AS \"USER\" FROM dual";
+        }
+        if (P_SHOW_CON.matcher(t).matches()) {
+            return "SELECT SYS_CONTEXT('USERENV','CON_NAME') AS \"CON_NAME\" FROM dual";
+        }
+        if ((m = P_SHOW_PARAM.matcher(t)).matches()) {
+            String name = m.group(1);
+            String pred = (name == null || name.isBlank())
+                    ? "1 = 1"
+                    : "name LIKE '%" + ident(name).toLowerCase() + "%'";
+            return "SELECT name AS \"NAME\", value AS \"VALUE\" FROM v$parameter WHERE " + pred + " ORDER BY name";
+        }
+        if (P_SHOW_PDBS.matcher(t).matches()) {
+            return "SELECT con_id AS \"CON_ID\", name AS \"NAME\", open_mode AS \"OPEN_MODE\" FROM v$pdbs ORDER BY con_id";
+        }
+        if (P_SHOW_TABLES.matcher(t).matches()) {
+            return "SELECT table_name AS \"TABLE_NAME\", num_rows AS \"NUM_ROWS\" FROM user_tables ORDER BY table_name";
+        }
+        if ((m = P_DDL.matcher(t)).matches()) {
+            String[] on = ownerAndName(m.group(1));
+            String owner = on[0] == null ? "USER" : "'" + on[0] + "'";
+            return "SELECT DBMS_METADATA.GET_DDL(\n"
+                    + "  (SELECT object_type FROM all_objects WHERE object_name='" + on[1] + "'\n"
+                    + "     AND owner=" + owner + " AND object_type IN ('TABLE','VIEW','INDEX','SEQUENCE') AND ROWNUM=1),\n"
+                    + "  '" + on[1] + "', " + owner + ") AS \"DDL\" FROM dual";
+        }
+        return null;
+    }
+
+    /** Splits {@code owner.name} (owner may be null) and validates both parts. */
+    private String[] ownerAndName(String raw) {
+        int dot = raw.indexOf('.');
+        if (dot >= 0) {
+            return new String[]{ident(raw.substring(0, dot)), ident(raw.substring(dot + 1))};
+        }
+        return new String[]{null, ident(raw)};
+    }
+
     /** Allows a single SELECT/WITH statement only; strips one trailing semicolon. */
     public String requireReadOnly(String rawSql) {
         if (rawSql == null || rawSql.isBlank()) {
@@ -156,7 +236,11 @@ public class CustomQueryService {
         Map<String, Object> row = new LinkedHashMap<>();
         for (int i = 0; i < names.length; i++) {
             Object value = rs.getObject(i + 1);
-            if (value != null && !(value instanceof Number) && !(value instanceof String)
+            if (value instanceof java.sql.Clob clob) {
+                // e.g. DBMS_METADATA.GET_DDL — read the CLOB content (capped)
+                long len = clob.length();
+                value = clob.getSubString(1, (int) Math.min(len, 1_000_000));
+            } else if (value != null && !(value instanceof Number) && !(value instanceof String)
                     && !(value instanceof Boolean)) {
                 value = value.toString();
             }

@@ -1,0 +1,18 @@
+services:
+  oracle:
+    image: gvenzl/oracle-free:slim-faststart
+    container_name: oracle-corso
+    ports:
+      - "1521:1521"
+      - "5500:5500"
+    environment:
+      ORACLE_PASSWORD: Corso2026
+      APP_USER: corso
+      APP_USER_PASSWORD: Corso2026
+    volumes:
+      # Persistent DB storage: survives reboots and `docker compose down`
+      # (use `docker compose down -v` to wipe it on purpose).
+      - oracle-data:/opt/oracle/oradata
+
+volumes:
+  oracle-data:

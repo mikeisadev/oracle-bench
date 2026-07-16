@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Oracle-bench - Oracle Database 19c: SQL Tuning Workshop</title>
+    <link rel="stylesheet" href="/vendor/xterm/xterm.css">
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -12,7 +13,10 @@
             <h1>Oracle-bench | Oracle Database 19c: SQL Tuning Workshop</h1>
             <p class="sub">Laboratorio pratico — bind vs literal, piani di esecuzione, statistiche e struttura degli oggetti.</p>
         </div>
-        <button id="guideBtn" class="guideBtn" title="Guida e glossario comandi SQL">ⓘ Guida</button>
+        <div class="topbar-actions">
+            <button id="setupBtn" class="setupBtn" title="Configura il database per il corso">▶ Avvia setup</button>
+            <button id="guideBtn" class="guideBtn" title="Guida e glossario comandi SQL">ⓘ Guida</button>
+        </div>
     </div>
 
     <div class="tabs">
@@ -98,9 +102,11 @@
             <button id="guideFromCustom">Comandi disponibili (Guida)</button>
             <span id="customInfo" class="note"></span>
         </div>
-        <p class="note">Solo query in lettura (SELECT/WITH), un singolo statement. La connessione viene aperta
-           in read-only. I comandi client di SQL*Plus (<code>DESC</code>, <code>SET AUTOTRACE</code>, <code>SHOW</code>)
-           non girano qui: apri la <strong>Guida</strong> per i loro equivalenti SQL.</p>
+        <p class="note">Query in lettura (SELECT/WITH), un singolo statement, connessione read-only.
+           Funzionano anche i comandi: <code>DESC &lt;tabella&gt;</code>, <code>SHOW USER</code>,
+           <code>SHOW CON_NAME</code>, <code>SHOW PARAMETER [nome]</code>, <code>SHOW PDBS</code>,
+           <code>SHOW TABLES</code>, <code>DDL &lt;oggetto&gt;</code>. I comandi puramente client
+           (<code>SET AUTOTRACE</code>, <code>SET TIMING</code>) restano nella <strong>Guida</strong>.</p>
         <div class="scroll"><table><thead id="customHead"></thead><tbody id="customBody"></tbody></table></div>
         <div id="customPlanStats" class="statgrid hidden"></div>
         <pre class="plan hidden" id="customPlan"></pre>
@@ -147,6 +153,120 @@
         </div>
     </div>
 
+    <!-- ============ SETUP: dialog di conferma ============ -->
+    <div class="overlay" id="setupOverlay">
+        <div class="modal">
+            <button class="close" id="setupCancel">Annulla ✕</button>
+            <h1 style="font-size:1.2rem">Avvia setup del database</h1>
+            <p class="sub">Prepara il container <code>oracle-corso</code> per il workshop, via
+               <code>docker exec</code> + <code>sqlplus</code>. Vedrai ogni comando in un terminale.</p>
+            <p>Cosa succederà:</p>
+            <ul class="note">
+                <li>Verifica connessione e versione del database</li>
+                <li>Creazione utente <strong>tuner</strong> con i privilegi del corso (abstract §6.5)</li>
+                <li>Grant su dizionario/V$ e sugli schemi <strong>HR</strong> e <strong>SH</strong> (a <code>corso</code> e <code>tuner</code>)</li>
+                <li>Raccolta statistiche ottimizzatore su HR e SH</li>
+                <li>Caricamento dati di test in <code>bench_customers</code> + statistiche</li>
+                <li>Verifica finale (utente e schemi)</li>
+            </ul>
+            <p class="note">⚠️ L'operazione <strong>ricrea</strong> l'utente <code>tuner</code> e
+               <strong>ripopola</strong> <code>bench_customers</code> (<code>TRUNCATE</code>). Gli schemi
+               HR/SH devono già esistere (SH si installa con SQLcl). Se annulli, non accade nulla.</p>
+            <div class="controls">
+                <button class="primary" id="setupConfirm">Conferma e avvia</button>
+                <button id="setupCancel2">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ SETUP: terminale ============ -->
+    <div class="overlay" id="termOverlay">
+        <div class="modal modal-term" id="termModal">
+            <div class="term-actions">
+                <button class="small" id="termFull" title="Schermo intero / riduci">⛶ Schermo intero</button>
+                <button class="small" id="termClose">Chiudi ✕</button>
+            </div>
+            <h1 style="font-size:1.15rem">Setup del database</h1>
+            <div id="termHost" class="termHost"></div>
+            <p class="note" id="termStatus"></p>
+        </div>
+    </div>
+
+    <!-- ============ SETUP: dialog di errore (container non attivo) ============ -->
+    <div class="overlay" id="setupErrOverlay">
+        <div class="modal modal-wide">
+            <button class="close" id="setupErrClose">Chiudi ✕</button>
+            <h1 style="font-size:1.2rem">⚠️ Container Docker non attivo</h1>
+            <p class="sub" id="setupErrMsg"></p>
+
+            <p><strong>Prima di avviare il setup, assicurati di:</strong></p>
+            <ol class="note">
+                <li>Avere <strong>Docker Desktop</strong> installato e in esecuzione.</li>
+                <li>Avere un container Oracle avviato con una delle due strade qui sotto.</li>
+                <li>Che <code>application.yml</code> punti a service name e credenziali corretti.</li>
+            </ol>
+
+            <h2>Strada A — Community gvenzl (consigliata)</h2>
+            <p class="note">Oracle 26ai Free, avvio in pochi secondi, service name <code>FREEPDB1</code>.
+               Con il <code>docker-compose.yml</code> del progetto (volume persistente):</p>
+            <pre class="plan">docker compose up -d
+docker logs -f oracle-corso    # attendi "DATABASE IS READY TO USE!"</pre>
+            <p class="note">Oppure senza compose:</p>
+            <pre class="plan">docker run -d --name oracle-corso -p 1521:1521 -p 5500:5500 \
+  -e ORACLE_PASSWORD=Corso2026 -e APP_USER=corso -e APP_USER_PASSWORD=Corso2026 \
+  gvenzl/oracle-free:slim-faststart</pre>
+            <p class="note"><strong>application.yml</strong> (Strada A):</p>
+            <pre class="plan">spring:
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: corso
+    password: Corso2026
+oracle-bench:
+  setup:
+    container: oracle-corso
+    service: FREEPDB1
+    system-password: Corso2026
+    app-password: Corso2026</pre>
+
+            <h2>Strada B — Oracle 19c ufficiale</h2>
+            <p class="note">Fedeltà 19c assoluta; richiede login su
+               <code>container-registry.oracle.com</code>. Service name <code>ORCLPDB1</code>.</p>
+            <pre class="plan">docker login container-registry.oracle.com
+docker pull container-registry.oracle.com/database/enterprise:19.3.0.0
+docker run -d --name oracle19c -p 1521:1521 -p 5500:5500 \
+  -e ORACLE_SID=ORCLCDB -e ORACLE_PDB=ORCLPDB1 -e ORACLE_PWD=Corso2026 \
+  -v oracle19c-data:/opt/oracle/oradata \
+  container-registry.oracle.com/database/enterprise:19.3.0.0</pre>
+            <p class="note"><strong>application.yml</strong> (Strada B — nota container e service diversi):</p>
+            <pre class="plan">spring:
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/ORCLPDB1
+    username: corso
+    password: Corso2026
+oracle-bench:
+  setup:
+    container: oracle19c
+    service: ORCLPDB1
+    system-password: Corso2026
+    app-password: Corso2026</pre>
+            <p class="note">Sull'immagine 19c ufficiale l'utente <code>corso</code> non esiste: crealo una volta
+               come <code>system</code> — <code>ALTER SESSION SET CONTAINER=ORCLPDB1;
+               CREATE USER corso IDENTIFIED BY Corso2026 DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;
+               GRANT CREATE SESSION, CREATE TABLE TO corso;</code> — poi il setup fa il resto.</p>
+
+            <p class="note">✅ Il setup automatico funziona con <strong>entrambe</strong> le edizioni: cambia
+               solo la configurazione qui sopra. Gli schemi <strong>HR/SH devono già esistere</strong>
+               (il setup li configura, non li installa; SH richiede SQLcl).</p>
+
+            <div class="controls">
+                <button class="primary" id="setupErrRetry">Ho avviato il container — Riprova</button>
+                <button id="setupErrClose2">Chiudi</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/vendor/xterm/xterm.js"></script>
+    <script src="/vendor/xterm/addon-fit.js"></script>
     <script type="module" src="/js/main.js"></script>
 </body>
 </html>

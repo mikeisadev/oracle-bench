@@ -45,11 +45,11 @@ public class SchemaController {
         }
     }
 
-    /** Detail of a single table: stats, columns, indexes, primary key. */
-    @GetMapping("/tables/{name}")
-    public ResponseEntity<?> table(@PathVariable String name) {
+    /** Detail of a single table (any visible schema): stats, columns, indexes, PK. */
+    @GetMapping("/tables/{owner}/{name}")
+    public ResponseEntity<?> table(@PathVariable String owner, @PathVariable String name) {
         try {
-            return ResponseEntity.ok(schemaService.tableDetail(name));
+            return ResponseEntity.ok(schemaService.tableDetail(owner, name));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (DataAccessException e) {
@@ -58,10 +58,10 @@ public class SchemaController {
     }
 
     /** Exact COUNT(*) for a table — contrast with the stats-based estimate. */
-    @GetMapping("/tables/{name}/count")
-    public ResponseEntity<?> count(@PathVariable String name) {
+    @GetMapping("/tables/{owner}/{name}/count")
+    public ResponseEntity<?> count(@PathVariable String owner, @PathVariable String name) {
         try {
-            return ResponseEntity.ok(schemaService.exactCount(name));
+            return ResponseEntity.ok(schemaService.exactCount(owner, name));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (DataAccessException e) {
