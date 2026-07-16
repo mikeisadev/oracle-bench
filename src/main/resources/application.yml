@@ -38,6 +38,7 @@ oracle-bench:
     tuner-user: tuner
     tuner-password: Corso2026#
     seed-rows: 50000            # righe di test caricate in bench_customers
+    require-demo-schemas: true  # blocca il setup se HR/SH non sono installati
 
 logging:
   level:

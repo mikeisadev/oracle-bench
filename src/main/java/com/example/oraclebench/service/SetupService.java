@@ -71,12 +71,31 @@ public class SetupService {
         running.set(false);
     }
 
-    /** Runs the whole sequence, emitting each terminal line to {@code out}. */
-    public void run(Consumer<String> out) {
+    /**
+     * Runs the whole sequence, emitting each terminal line to {@code out}.
+     * Returns the outcome: {@code "ok"} or {@code "blocked"} (demo schemas missing).
+     */
+    public String run(Consumer<String> out) {
         List<Step> steps = steps();
         log.info("Avvio setup: {} passi sul container {}", steps.size(), cfg.getContainer());
         out.accept(BOLD + CYAN + "Setup ambiente ORA1150 — container '" + cfg.getContainer() + "'" + RESET);
         out.accept(DIM + "Passi: " + steps.size() + ". Le password sono mascherate nell'output." + RESET);
+
+        // Pre-flight: HR and SH must already exist (installed manually — è un esercizio del corso).
+        if (cfg.isRequireDemoSchemas()) {
+            out.accept("");
+            out.accept(BOLD + CYAN + "══ Pre-flight: schemi demo HR e SH ══" + RESET);
+            int[] counts = countDemoSchemas(out);
+            if (counts == null) {
+                out.accept(RED + BOLD + "Impossibile verificare gli schemi (DB o container non raggiungibile)." + RESET);
+                return "blocked";
+            }
+            if (counts[0] == 0 || counts[1] == 0) {
+                emitBlock(out, counts);
+                return "blocked";
+            }
+            out.accept(GREEN + "✓ HR (" + counts[0] + " tabelle) e SH (" + counts[1] + " tabelle) presenti." + RESET);
+        }
 
         int n = 0;
         for (Step s : steps) {
@@ -97,7 +116,7 @@ public class SetupService {
                 out.accept(RED + "✗ step terminato con codice " + code + RESET);
                 if (s.critical()) {
                     out.accept(RED + BOLD + "Passo critico fallito: setup interrotto." + RESET);
-                    return;
+                    return "blocked";
                 }
             }
         }
@@ -105,6 +124,54 @@ public class SetupService {
         out.accept(BOLD + GREEN + "✔ Setup completato. Ora puoi connettere l'app come '"
                 + cfg.getTunerUser() + "' o usare '" + cfg.getAppUser() + "'." + RESET);
         out.accept(YELLOW + "Ricorda: riavvia l'app se cambi utente in application.yml." + RESET);
+        return "ok";
+    }
+
+    // ---------- pre-flight ----------
+
+    /** Counts HR/SH tables (as SYSTEM). Returns {hrCount, shCount} or null on failure. */
+    private int[] countDemoSchemas(Consumer<String> out) {
+        String connect = cfg.getSystemUser() + "/" + cfg.getSystemPassword()
+                + "@//localhost:1521/" + cfg.getService();
+        String script = "sqlplus -s " + connect + " <<'OBSQL'\n"
+                + "WHENEVER SQLERROR CONTINUE\nSET HEAD OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 100\n"
+                + "SELECT 'HRSH:'||(SELECT COUNT(*) FROM dba_tables WHERE owner='HR')"
+                + "||':'||(SELECT COUNT(*) FROM dba_tables WHERE owner='SH') FROM dual;\n"
+                + "EXIT\nOBSQL\n";
+        List<String> lines = new ArrayList<>();
+        int code = exec(List.of(cfg.getDockerPath(), "exec", cfg.getContainer(), "bash", "-lc", script), lines::add);
+        if (code == 0) {
+            for (String l : lines) {
+                int idx = l.indexOf("HRSH:");
+                if (idx >= 0) {
+                    String[] p = l.substring(idx + 5).trim().split(":");
+                    try {
+                        return new int[]{Integer.parseInt(p[0].trim()), Integer.parseInt(p[1].trim())};
+                    } catch (RuntimeException ignore) {
+                        // fall through to the diagnostic dump
+                    }
+                }
+            }
+        }
+        lines.forEach(out); // show whatever came back, to diagnose
+        return null;
+    }
+
+    /** Blocks the setup with an explanatory message when HR/SH are missing. */
+    private void emitBlock(Consumer<String> out, int[] counts) {
+        String hr = counts[0] > 0 ? GREEN + "presente" + RESET : RED + "MANCANTE" + RESET;
+        String sh = counts[1] > 0 ? GREEN + "presente" + RESET : RED + "MANCANTE" + RESET;
+        out.accept(RED + BOLD + "⛔ BLOCCO: gli schemi demo non sono installati." + RESET);
+        out.accept("   HR: " + hr + "    SH: " + sh);
+        out.accept("");
+        out.accept(YELLOW + "Il setup si aspetta HR e SH già installati: installali a mano nel container "
+                + "(è un esercizio del corso), poi rilancia il setup." + RESET);
+        out.accept(DIM + "Come installarli (dal terminale):" + RESET);
+        out.accept(DIM + "  docker exec -it " + cfg.getContainer() + " bash" + RESET);
+        out.accept(DIM + "  curl -sSL https://github.com/oracle-samples/db-sample-schemas/archive/refs/tags/v23.3.tar.gz | tar xzf -" + RESET);
+        out.accept(DIM + "  cd db-sample-schemas-23.3/human_resources" + RESET);
+        out.accept(DIM + "  sqlplus " + cfg.getSystemUser() + "/****@//localhost:1521/" + cfg.getService() + " @hr_install.sql" + RESET);
+        out.accept(DIM + "  # SH: usa SQLcl (comando LOAD dei CSV) — vedi README «Installare gli schemi demo HR e SH»" + RESET);
     }
 
     // ---------- steps ----------

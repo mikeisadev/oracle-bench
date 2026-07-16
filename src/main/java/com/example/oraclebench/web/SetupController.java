@@ -53,8 +53,8 @@ public class SetupController {
 
         executor.submit(() -> {
             try {
-                setup.run(line -> sendOrThrow(emitter, line));
-                sendQuietly(emitter, "done", "ok");
+                String outcome = setup.run(line -> sendOrThrow(emitter, line));
+                sendQuietly(emitter, "done", outcome);
             } catch (Exception e) {
                 sendQuietly(emitter, "message", "[31mERRORE: " + e.getMessage() + "[0m");
                 sendQuietly(emitter, "done", "error");

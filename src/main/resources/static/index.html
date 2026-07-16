@@ -171,7 +171,8 @@
             </ul>
             <p class="note">⚠️ L'operazione <strong>ricrea</strong> l'utente <code>tuner</code> e
                <strong>ripopola</strong> <code>bench_customers</code> (<code>TRUNCATE</code>). Gli schemi
-               HR/SH devono già esistere (SH si installa con SQLcl). Se annulli, non accade nulla.</p>
+               <strong>HR e SH devono già essere installati</strong> (si installano a mano nel container):
+               se mancano, il setup <strong>si blocca</strong> con le istruzioni. Se annulli, non accade nulla.</p>
             <div class="controls">
                 <button class="primary" id="setupConfirm">Conferma e avvia</button>
                 <button id="setupCancel2">Annulla</button>

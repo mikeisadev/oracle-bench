@@ -234,6 +234,7 @@ avviarlo (le due strade qui sotto) invece di far partire il setup.
 
 Cosa fa il setup (via `docker exec … sqlplus`, output con password mascherate):
 
+0. **pre-flight**: verifica che HR e SH siano installati — se mancano, **blocca**;
 1. verifica connessione e versione del DB;
 2. crea l'utente **`tuner`** con i privilegi del corso (§6.5);
 3. concede lettura su dizionario/`V$` e sugli schemi **HR** e **SH** a `corso` e `tuner`;
@@ -241,8 +242,13 @@ Cosa fa il setup (via `docker exec … sqlplus`, output con password mascherate)
 5. `TRUNCATE` + carica i dati di test in `bench_customers` (+ statistiche);
 6. verifica finale.
 
-> Il setup **configura** l'accesso a HR/SH ma non li **installa** (devono già esistere;
-> SH richiede SQLcl — vedi [Installare gli schemi demo HR e SH](#installare-gli-schemi-demo-hr-e-sh)).
+> Il setup **configura** l'accesso a HR/SH ma non li **installa**. Un **pre-flight**
+> controlla che HR e SH esistano e, se mancano, **blocca** la procedura (stato
+> `blocked`) mostrando nel terminale le istruzioni per installarli a mano — così non
+> ti ritrovi con un ambiente a metà. Installali (è un esercizio del corso, vedi
+> [Installare gli schemi demo HR e SH](#installare-gli-schemi-demo-hr-e-sh); SH richiede
+> SQLcl) e **rilancia** il setup. Puoi disattivare il blocco con
+> `oracle-bench.setup.require-demo-schemas: false`.
 
 ### Funziona su entrambe le edizioni
 

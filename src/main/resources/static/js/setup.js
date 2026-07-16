@@ -96,9 +96,11 @@ function startSetup() {
     source.addEventListener('done', e => {
         finished = true;
         closeSource();
-        document.getElementById('termStatus').textContent = e.data === 'ok'
-            ? '✔ Setup completato con successo.'
-            : (e.data === 'busy' ? 'Un setup è già in corso.' : '✗ Setup terminato con errori — controlla l’output.');
+        const status = document.getElementById('termStatus');
+        if (e.data === 'ok') status.textContent = '✔ Setup completato con successo.';
+        else if (e.data === 'blocked') status.textContent = '⛔ Setup bloccato: installa HR/SH (vedi terminale), poi riprova.';
+        else if (e.data === 'busy') status.textContent = 'Un setup è già in corso.';
+        else status.textContent = '✗ Setup terminato con errori — controlla l’output.';
     });
     source.onerror = () => {
         if (finished) return;

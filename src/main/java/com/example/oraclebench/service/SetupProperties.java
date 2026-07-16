@@ -29,6 +29,9 @@ public class SetupProperties {
     /** How many test rows to load into bench_customers. */
     private int seedRows = 50000;
 
+    /** If true, the setup blocks when HR/SH are not installed (install them manually first). */
+    private boolean requireDemoSchemas = true;
+
     public String getDockerPath() { return dockerPath; }
     public void setDockerPath(String dockerPath) { this.dockerPath = dockerPath; }
     public String getContainer() { return container; }
@@ -49,4 +52,6 @@ public class SetupProperties {
     public void setTunerPassword(String tunerPassword) { this.tunerPassword = tunerPassword; }
     public int getSeedRows() { return seedRows; }
     public void setSeedRows(int seedRows) { this.seedRows = seedRows; }
+    public boolean isRequireDemoSchemas() { return requireDemoSchemas; }
+    public void setRequireDemoSchemas(boolean requireDemoSchemas) { this.requireDemoSchemas = requireDemoSchemas; }
 }
