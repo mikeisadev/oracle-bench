@@ -1,0 +1,38 @@
+[
+  {
+    "id": "func-on-column",
+    "title": "Funzione su colonna indicizzata",
+    "problem": "UPPER(name) impedisce l'uso di un indice normale su NAME: l'indice contiene i valori di NAME, non di UPPER(NAME). L'ottimizzatore è costretto al FULL TABLE SCAN.",
+    "fix": "Confronta la colonna così com'è, oppure crea un function-based index su UPPER(name).",
+    "badSql": "SELECT id, name FROM bench_customers WHERE UPPER(name) = 'MARIO ROSSI'",
+    "goodSql": "SELECT id, name FROM bench_customers WHERE name = 'Mario Rossi'",
+    "needsIndexOn": "NAME"
+  },
+  {
+    "id": "leading-wildcard",
+    "title": "Wildcard iniziale nella LIKE",
+    "problem": "LIKE '%ossi' ha il carattere jolly all'inizio: un B-tree è ordinato dal primo carattere, quindi non può essere usato per una range scan e si finisce in FULL SCAN.",
+    "fix": "Ancora la ricerca all'inizio della stringa (LIKE 'Rossi%'), così l'indice su NAME diventa utilizzabile.",
+    "badSql": "SELECT id, name FROM bench_customers WHERE name LIKE '%Rossi'",
+    "goodSql": "SELECT id, name FROM bench_customers WHERE name LIKE 'Mario%'",
+    "needsIndexOn": "NAME"
+  },
+  {
+    "id": "conversion-on-id",
+    "title": "Conversione di tipo sulla colonna",
+    "problem": "TO_CHAR(id) applica una funzione alla colonna numerica (spesso frutto di conversioni implicite): l'indice/PK su ID non è più utilizzabile e si passa a un FULL SCAN.",
+    "fix": "Passa il valore nel tipo corretto e confronta la colonna direttamente (id = 100), senza funzioni.",
+    "badSql": "SELECT id, name FROM bench_customers WHERE TO_CHAR(id) = '100'",
+    "goodSql": "SELECT id, name FROM bench_customers WHERE id = 100",
+    "needsIndexOn": null
+  },
+  {
+    "id": "select-star",
+    "title": "SELECT * contro proiezione mirata",
+    "problem": "SELECT * legge e trasferisce tutte le colonne e impedisce all'ottimizzatore di risolvere la query con il solo indice (index-only scan): serve sempre l'accesso alla tabella.",
+    "fix": "Proietta solo le colonne che servono; se coincidono con un indice, Oracle può evitare del tutto l'accesso alla tabella.",
+    "badSql": "SELECT * FROM bench_customers WHERE name = 'Mario Rossi'",
+    "goodSql": "SELECT name FROM bench_customers WHERE name = 'Mario Rossi'",
+    "needsIndexOn": "NAME"
+  }
+]

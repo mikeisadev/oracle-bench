@@ -25,5 +25,8 @@ SELECT id, name, email, created_at FROM bench_customers ORDER BY id
 --#5
 SELECT id, name, email, created_at FROM bench_customers WHERE name = ?
 
+--#6
+SELECT id, name, email, created_at FROM bench_customers WHERE email = ?
+
 --#99
 SELECT id, name, email, created_at FROM bench_customers WHERE name = '__P__'

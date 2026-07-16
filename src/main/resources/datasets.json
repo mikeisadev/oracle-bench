@@ -1,0 +1,41 @@
+[
+  {
+    "group": "HR — schema di sintassi (dati piccoli)",
+    "owner": "HR",
+    "items": [
+      { "name": "REGIONS" },
+      { "name": "COUNTRIES" },
+      { "name": "LOCATIONS" },
+      { "name": "DEPARTMENTS" },
+      { "name": "JOBS" },
+      { "name": "EMPLOYEES" },
+      { "name": "JOB_HISTORY" }
+    ]
+  },
+  {
+    "group": "SH — schema di performance (Sales History)",
+    "owner": "SH",
+    "items": [
+      { "name": "SALES", "expectedRows": 918843 },
+      { "name": "CUSTOMERS", "expectedRows": 55500 },
+      { "name": "PRODUCTS", "expectedRows": 72 },
+      { "name": "TIMES", "expectedRows": 1826 }
+    ]
+  },
+  {
+    "group": "Copie di lavoro nello schema del corso",
+    "owner": "$USER",
+    "items": [
+      { "name": "SALES_T" },
+      { "name": "CUSTOMERS_T" },
+      { "name": "EMPLOYEES_T" }
+    ]
+  },
+  {
+    "group": "Progetto benchmark",
+    "owner": "$USER",
+    "items": [
+      { "name": "BENCH_CUSTOMERS" }
+    ]
+  }
+]

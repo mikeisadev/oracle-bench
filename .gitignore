@@ -4,3 +4,7 @@ target/
 *.iml
 .vscode/
 .DS_Store
+
+procedure-miscellanee.md
+prompt-claude-design-oracle-19c-sql-tuning.md
+glossario-esempio.md

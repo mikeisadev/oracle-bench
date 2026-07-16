@@ -35,11 +35,20 @@ connection pool, così da poterli governare con consapevolezza.
 | **spring-boot-starter-web** | REST + Tomcat embedded | espone le API e serve `index.html` |
 | **spring-boot-starter-jdbc** | JDBC + **HikariCP** | dà `DataSource`/`JdbcTemplate` e il connection pool |
 | **ojdbc11** | driver JDBC Oracle | traduce le chiamate JDBC nel protocollo di rete di Oracle |
-| **Oracle Database (Free)** | il database | è il soggetto del benchmark (parsing, `V$SQL`, `sql_id`) |
+| **Oracle Database** | il database | è il soggetto del benchmark (parsing, `V$SQL`, `sql_id`) |
 | **HikariCP** | connection pool | riusa le connessioni invece di aprirle a ogni richiesta |
 
 Nessun framework JavaScript lato client: la UI è HTML + vanilla JS, per tenere il
 focus sul database.
+
+> **Ambiente testato (E2E):** immagine community `gvenzl/oracle-free:slim-faststart`,
+> che oggi porta **Oracle AI Database 26ai Free 23.26.2.0.0**. Questa immagine include
+> **SQL\*Plus** ma **non SQLcl** (`sql`): per i comandi da terminale del corso usa
+> `sqlplus`. Tutta la SQL usata dall'app (`EXPLAIN PLAN`, `DBMS_XPLAN.DISPLAY`/
+> `DISPLAY_CURSOR`, `V$SQL`, `V$MYSTAT`, `DBMS_STATS`, `LISTAGG`, `GENERATED AS
+> IDENTITY`, `FETCH FIRST`, `ALTER SESSION SET STATISTICS_LEVEL`) esiste identica anche
+> su **Oracle 19c** ufficiale (`container-registry.oracle.com/.../enterprise:19.3.0.0`),
+> quindi gli esempi sono compatibili con entrambe le versioni.
 
 ---
 
@@ -55,9 +64,11 @@ Serve un Oracle Database in ascolto su `localhost:1521`, **service name**
 | utente        | corso           |
 | password      | Corso2026       |
 
-> ⚠️ Le credenziali qui riportate sono quelle di `application.yml`. Se le cambi lì,
-> aggiorna anche questa tabella (o meglio: usa variabili d'ambiente, vedi
-> [Governare la configurazione](#governare-la-configurazione-profili-segreti-tuning)).
+> ⚠️ **Password reale del container**: `Corso2026` (senza `#`). L'abstract cita
+> `Corso2026#`, ma il container `gvenzl` in uso è stato avviato con `Corso2026` per
+> `system` e `corso` (verificato via `sqlplus` dentro il container). `application.yml`
+> è quindi corretto. Se le cambi, aggiorna anche questa tabella (o usa variabili
+> d'ambiente, vedi [Governare la configurazione](#governare-la-configurazione-profili-segreti-tuning)).
 
 ### Cos'è `FREEPDB1` (e perché "service name" e non "SID")
 
@@ -80,25 +91,100 @@ richiesta, legge il service name e la instrada alla PDB giusta.
 
 ### Creare l'utente (una tantum, come SYS)
 
+Il corso (vedi l'abstract §6.5) usa un utente **`tuner`** con accesso in lettura agli
+schemi demo HR/SH e al dizionario dati:
+
 ```sql
 -- collegati alla PDB, non al CDB
 ALTER SESSION SET CONTAINER = FREEPDB1;
 
-CREATE USER corso IDENTIFIED BY Corso2026
-  QUOTA UNLIMITED ON USERS;
-GRANT CREATE SESSION, CREATE TABLE TO corso;
+CREATE USER tuner IDENTIFIED BY "Corso2026#" QUOTA UNLIMITED ON users;
+-- NB: non esiste il privilegio "CREATE INDEX": per indicizzare una PROPRIA tabella
+-- basta possederla (CREATE TABLE). CREATE ANY INDEX serve solo per tabelle altrui.
+GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SYNONYM TO tuner;
 
--- opzionale ma consigliato per la demo sul sql_id:
-GRANT SELECT ON v_$sql TO corso;
+-- viste V$ e dizionario (sql_id, autotrace, V$SQL, piani runtime, checklist dataset)
+GRANT SELECT ANY DICTIONARY TO tuner;      -- comodità di laboratorio
+
+-- lettura degli schemi demo (per la scheda Tabelle/Dataset e le Query custom)
+GRANT SELECT ON sh.sales     TO tuner;
+GRANT SELECT ON sh.customers TO tuner;
+GRANT SELECT ON sh.products  TO tuner;
+GRANT SELECT ON sh.times     TO tuner;
+GRANT SELECT ON hr.employees TO tuner;
+GRANT SELECT ON hr.departments TO tuner;
+-- (per i moduli 3–12) tracing e SQL Plan Baselines:
+GRANT EXECUTE ON DBMS_MONITOR TO tuner;
+GRANT ADMINISTER SQL MANAGEMENT OBJECT TO tuner;
 ```
 
-> **`sql_id` e `V$SQL`**: la vista `V$SQL` è una *dynamic performance view* di sistema
-> (il vero oggetto si chiama `V_$SQL`, `V$SQL` ne è il sinonimo pubblico). Per leggerla
-> serve un grant esplicito. Senza il grant l'app funziona lo stesso: logga un warning e
-> il campo `sqlId` resta vuoto.
+> ⚠️ **Utente in `application.yml`**: il file punta a `corso`/`Corso2026` (l'`APP_USER`
+> del container `gvenzl`). Appena creato, `corso` ha solo `DB_DEVELOPER_ROLE` e **non
+> vede né `V$SQL` né HR/SH** (ORA-00942): Autotrace, V$SQL stats e la checklist HR
+> restano rosse. Nel test E2E ho concesso a `corso` i grant minimi (come `system`,
+> dentro il container) — replicali se usi `corso`:
+>
+> ```sql
+> -- come system @ FREEPDB1
+> GRANT SELECT ANY DICTIONARY TO corso;        -- V$SQL, V$MYSTAT, piani runtime
+> BEGIN
+>   FOR t IN (SELECT table_name FROM dba_tables WHERE owner = 'HR') LOOP
+>     EXECUTE IMMEDIATE 'GRANT SELECT ON HR.' || t.table_name || ' TO corso';
+>   END LOOP;
+> END;
+> /
+> ```
+>
+> In alternativa, per seguire l'abstract alla lettera, connetti l'app come **`tuner`**.
+
+> **Cosa serve a cosa**: `SELECT ANY DICTIONARY` (o `SELECT_CATALOG_ROLE`) abilita le
+> letture su `V$SQL`, `V$SQL_PLAN`, `V$SQL_PLAN_STATISTICS_ALL`, `V$SESSION`,
+> `V$MYSTAT`, `V$STATNAME` usate da Autotrace e dal pannello V$SQL. Senza, il
+> Benchmark funziona comunque (con `sqlId` vuoto) ed `EXPLAIN PLAN` pure (usa solo il
+> PLAN_TABLE); Autotrace e le statistiche V$SQL no.
+
+> ⚠️ **Licenze**: gli strumenti qui usano solo `EXPLAIN PLAN`, `DBMS_XPLAN` e le viste
+> `V$`, che **non** richiedono il Diagnostic/Tuning Pack. Su Oracle Free/Standard
+> Edition evita invece AWR, ASH, SQL Monitor e SQL Tuning Advisor: sono a pagamento e
+> licenziati solo su Enterprise Edition con quei pack.
 
 La tabella `bench_customers` **non** la crei a mano: viene creata all'avvio da
 `src/main/resources/schema.sql` (vedi `spring.sql.init` più avanti).
+
+### Installare gli schemi demo HR e SH
+
+I sample schemas sono già scaricati nel container `gvenzl` sotto
+`/opt/oracle/db-sample-schemas-23.3/`. **HR** si installa con `sqlplus`. **SH** invece
+carica i CSV grandi (sales.csv ≈ 918k righe) con il comando **`LOAD` di SQLcl**
+(`sh_populate.sql`), e l'immagine `slim` **non include SQLcl**. Due strade:
+
+- **Immagine 19c ufficiale** (o qualunque ambiente con SQLcl): esegui gli script così
+  come sono — `sql system/…@//host:1521/SERVICE @sh_install.sql`.
+- **Immagine community `slim` (senza SQLcl):** scarica SQLcl a parte (gira con un
+  qualsiasi JDK 17+) e lancia lo stesso `sh_install.sql` puntando a `localhost:1521`;
+  i CSV si trovano nel container (copiabili con `docker cp`). È così che questo SH è
+  stato installato e verificato: SALES 918.843, CUSTOMERS 55.500, COSTS 82.112, ecc.
+
+> ⚠️ **Due trappole dell'immagine `slim`/dataset recente, verificate:**
+> 1. L'ultimo passo di `sh_populate.sql` crea un indice **Oracle Text**
+>    (`INDEXTYPE IS ctxsys.context` su `supplementary_demographics`): fallisce con
+>    **ORA-29833** perché la `slim` rimuove Oracle Text. È un indice **non essenziale**
+>    per il corso — tutti i dati SH sono comunque caricati.
+> 2. In `db-sample-schemas-23.3` le date di SH vanno da **2019-01-01 a 2023-12-31**,
+>    non più dal 1998–2001 dello storico SH. **Adatta le date degli esempi** (l'abstract
+>    cita `DATE '2001-06-15'`, che qui restituirebbe 0 righe).
+
+Dopo l'install, dai all'utente dell'app la lettura su SH (già fatto nel test E2E):
+
+```sql
+BEGIN
+  FOR t IN (SELECT table_name FROM dba_tables WHERE owner = 'SH') LOOP
+    EXECUTE IMMEDIATE 'GRANT SELECT ON SH.' || t.table_name || ' TO corso';
+  END LOOP;
+END;
+/
+EXEC DBMS_STATS.GATHER_SCHEMA_STATS('SH');
+```
 
 ---
 
@@ -388,25 +474,147 @@ chiavi del profilo attivo sovrascrivono quelle di base.
 
 ---
 
+## Interfaccia web
+
+La UI (`/`) è organizzata in **tab**:
+
+- **Benchmark** — select delle query, campo `p`, checkbox **"Includi dati"** e uno
+  switch **Performance / Dati**: la vista *Performance* accumula i tempi (verde =
+  minimo, rosso = massimo), la vista *Dati* mostra le righe dell'ultima esecuzione.
+- **Tabelle** — in cima la **checklist Dataset del corso** (HR, SH, copie di lavoro,
+  progetto) con stato **verde/rosso**: verde = presente e visibile, rosso = mancante o
+  non visibile all'utente connesso. Sotto, l'elenco delle tabelle dell'utente e il
+  dettaglio con statistiche (righe da stats, dimensione, blocchi, avg row len, ultima
+  analisi), pulsanti **COUNT(\*) esatto** e **Aggiorna statistiche**, colonne e indici.
+  Lo switch **"Mostra tipi e caratteristiche colonne"** aggiunge tipo, nullabilità e
+  PK. Pannello per **generare N righe** in `bench_customers` e per **creare/eliminare
+  indici**.
+- **Query custom** — scegli una tabella (tuo schema + HR + SH), spunta le colonne o
+  usa **Tutte le colonne**, **Costruisci SELECT** e modifica la query a mano; solo
+  query in lettura (SELECT/WITH, connessione read-only). Risultati con righe, ms e
+  `sql_id`. Sulla **stessa query dell'editor** puoi lanciare **Explain Plan** e
+  **Autotrace**: così analizzi qualsiasi query su HR/SH (join, indici compositi,
+  aggregazioni…), non solo le query predefinite.
+- **Guida** (icona ⓘ in alto a destra) — guida rapida con il **glossario dei comandi
+  SQL** del corso (dal cheat sheet): comandi client SQL\*Plus con il loro equivalente
+  SQL, query sul dizionario dati, equivalenze MySQL→Oracle. Ogni snippet eseguibile ha
+  un pulsante **Inserisci** che lo porta nell'editor Query custom.
+- **SQL Tuning** — il laboratorio vero e proprio:
+  - **Piano di esecuzione**: scegli una query e lancia **Explain Plan** (stima, non
+    esegue) o **Autotrace** (esegue con `STATISTICS_LEVEL=ALL` e mostra il piano reale
+    con A-Rows più l'I/O logico consumato).
+  - **Statistiche cumulative V$SQL**: dato un `sql_id`, mostra `executions`,
+    `parse_calls`, `buffer_gets`, `disk_reads`, numero di piani distinti, ecc.
+  - **Catalogo anti-pattern**: casi "lento vs buono" (funzione su colonna, wildcard
+    iniziale, conversione di tipo, `SELECT *`) con i piani a confronto.
+
 ## REST API
 
 ### Query di benchmark
 
-| metodo | endpoint                     | descrizione |
-|--------|------------------------------|-------------|
-| GET    | `/api/queries`               | elenco delle query disponibili (id + SQL) |
-| GET    | `/api/query?id=<n>&p=<val>`  | esegue la query `n`; `p` è opzionale |
+| metodo | endpoint                              | descrizione |
+|--------|---------------------------------------|-------------|
+| GET    | `/api/queries`                        | elenco delle query disponibili (id + SQL) |
+| GET    | `/api/query?id=<n>&p=<val>&data=true` | esegue la query `n`; `p` e `data` opzionali |
 
-Risposta:
+Risposta base:
 
 ```json
 { "id": 1, "rows": 1, "elapsedMs": 0.842, "sqlId": "abc123def456" }
 ```
 
+Con `data=true` la risposta include anche i dati (fino a 500 righe materializzate):
+
+```json
+{ "id": 4, "rows": 3, "elapsedMs": 1.2, "sqlId": "…",
+  "columns": ["ID","NAME","EMAIL","CREATED_AT"],
+  "data": [ { "ID": 1, "NAME": "Mario Rossi", "EMAIL": "…", "CREATED_AT": "…" } ],
+  "truncated": false }
+```
+
 - `elapsedMs` è misurato con `System.nanoTime()` **attorno alla sola
-  esecuzione + fetch** del ResultSet.
+  esecuzione + fetch** del ResultSet. Anche con `data=true` **tutte** le righe
+  vengono fetchate (il tempo resta rappresentativo); solo le prime 500 finiscono
+  nel JSON e `truncated` diventa `true` se ce ne sono di più.
 - `sqlId` è recuperato con una seconda query su `V$SQL` cercando il testo esatto
   (`WHERE sql_text = ?`); è vuoto se non trovato.
+
+### Esplorazione dello schema
+
+| metodo | endpoint                                | descrizione |
+|--------|-----------------------------------------|-------------|
+| GET    | `/api/schema/datasets`                  | checklist HR/SH/copie/progetto: presente o mancante (+ num_rows) |
+| GET    | `/api/schema/tables`                    | tabelle dell'utente: righe (stats) e dimensione segmento |
+| GET    | `/api/schema/tables/{name}`             | dettaglio: statistiche, colonne, indici, PK |
+| GET    | `/api/schema/tables/{name}/count`       | `COUNT(*)` esatto (da contrapporre alle stats) |
+
+### Query custom
+
+| metodo | endpoint                                     | descrizione |
+|--------|----------------------------------------------|-------------|
+| GET    | `/api/custom/tables`                         | tabelle visibili (tuo schema + HR + SH) per il picker |
+| GET    | `/api/custom/columns?owner=<O>&table=<T>`    | colonne di una tabella |
+| POST   | `/api/custom/run` (body `{"sql":"…"}`)       | esegue una SELECT/WITH in **sola lettura** |
+
+Il runner custom accetta **un solo statement** SELECT/WITH, apre la connessione in
+read-only e rifiuta DML/DDL: è un editor didattico, non una console amministrativa.
+I comandi client di SQL\*Plus (`DESC`, `SET AUTOTRACE`, `SHOW`) non passano da JDBC —
+la Guida ne fornisce gli equivalenti SQL.
+
+Le "righe" in `/api/schema/tables` vengono da `USER_TABLES.NUM_ROWS`, cioè dalle
+**statistiche dell'ottimizzatore** (possono essere `null` o stantie); la
+dimensione da `USER_SEGMENTS.BYTES`. L'endpoint `/count` esegue un `COUNT(*)`
+reale — il confronto tra i due valori è una lezione di tuning in sé.
+
+### Strumenti di tuning
+
+| metodo | endpoint                                             | descrizione |
+|--------|------------------------------------------------------|-------------|
+| GET    | `/api/tuning/plan?id=<n>&p=<v>`                       | `EXPLAIN PLAN` (stima) di una query predefinita |
+| GET    | `/api/tuning/autotrace?id=<n>&p=<v>`                  | esegue + piano reale (A-Rows) + I/O logico |
+| POST   | `/api/tuning/plan` (body `{"sql":"…"}`)              | `EXPLAIN PLAN` di una SELECT libera (read-only) |
+| POST   | `/api/tuning/autotrace` (body `{"sql":"…"}`)        | autotrace di una SELECT libera (read-only) |
+| GET    | `/api/tuning/sqlstats/{sqlId}`                        | statistiche cumulative da `V$SQL` |
+| GET    | `/api/tuning/antipatterns`                            | catalogo dei casi "lento vs buono" |
+| GET    | `/api/tuning/antipatterns/{id}/plan?variant=bad\|good`     | `EXPLAIN PLAN` di una variante |
+| GET    | `/api/tuning/antipatterns/{id}/autotrace?variant=bad\|good`| autotrace di una variante |
+
+Il catalogo anti-pattern è **lato server** (`src/main/resources/antipatterns.json`):
+il client indica solo id e variante, così non viene mai eseguita SQL arbitraria dal
+browser.
+
+### Lab: seeding e indici
+
+| metodo | endpoint                                    | descrizione |
+|--------|---------------------------------------------|-------------|
+| POST   | `/api/admin/seed?n=<N>`                      | inserisce N righe fittizie (batch) in `bench_customers` |
+| POST   | `/api/admin/truncate`                        | svuota `bench_customers` |
+| POST   | `/api/admin/gather-stats?table=<T>`          | ricalcola le statistiche (`DBMS_STATS`) |
+| POST   | `/api/admin/index?table=<T>&column=<C>`      | crea un indice non univoco su `T(C)` |
+| DELETE | `/api/admin/index/{name}`                    | elimina un indice (rifiuta quelli che reggono un vincolo) |
+
+Nomi di tabella/colonna/indice sono **validati** contro il dizionario dati e un
+pattern di identificatore prima di finire in una `CREATE INDEX`/`COUNT(*)`, perché un
+identificatore non può essere una bind variable.
+
+### Flusso didattico consigliato
+
+1. **Tabelle → Genera dati**: es. 50.000 righe in `bench_customers`. Le email sono
+   sequenziali (`cliente1@…`, `cliente2@…`, uniche → **selettive**); i nomi sono a
+   bassa cardinalità (144 valori distinti → **non selettivi**), di proposito.
+2. **Tabelle → Aggiorna statistiche** (`DBMS_STATS`): confronta le "righe (stats)" con
+   il **COUNT(\*) esatto**.
+3. **SQL Tuning → Autotrace** della **query #6** (`WHERE email = ?`, es.
+   `p = cliente25000@example.com`): **FULL TABLE SCAN**, ~**548 logical reads** per 1 riga.
+4. **Tabelle → Crea indice** su `EMAIL`, poi ri-esegui l'autotrace della #6: il piano
+   passa a **INDEX RANGE SCAN**, **3 logical reads** (numeri reali dal test E2E).
+5. **Contrappunto didattico**: prova lo stesso con la **query #5** (`WHERE name = ?`) e
+   un indice su `NAME`: il piano **resta FULL SCAN**, perché `NAME` non è selettivo
+   (~347 righe per valore) — l'ottimizzatore fa bene a ignorare l'indice. È la lezione
+   su *selettività e clustering*, non un bug.
+6. **Catalogo anti-pattern**: confronta i piani di ogni caso lento vs buono
+   (la versione "buona" di *func-on-column* usa l'indice su `NAME` perché proietta solo
+   `id, name` → risoluzione *index-only*).
 
 ### CRUD cliente
 
