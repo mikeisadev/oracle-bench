@@ -103,7 +103,7 @@ public class QueryService {
                 }
             }
         } catch (SQLException e) {
-            log.warn("Could not query V$SQL for SQL_ID (grant SELECT on V$SQL to 'tuner'?): {}", e.getMessage());
+            log.warn("Could not query V$SQL for SQL_ID (missing GRANT SELECT ON v_$sql to the app user?): {}", e.getMessage());
         }
         return null;
     }
