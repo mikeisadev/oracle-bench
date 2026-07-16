@@ -18,7 +18,7 @@
     <description>Oracle Database benchmarking playground (hard parse / SQL injection demo)</description>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <ojdbc.version>23.4.0.24.05</ojdbc.version>
     </properties>
 

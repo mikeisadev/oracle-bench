@@ -32,8 +32,19 @@ La tabella `bench_customers` viene creata automaticamente all'avvio da
 
 ## Avvio
 
+Il progetto include il **Maven Wrapper**, quindi non serve avere Maven installato:
+`mvnw` scarica automaticamente la versione corretta al primo utilizzo.
+
+**macOS / Linux:**
+
 ```bash
-mvn spring-boot:run
+./mvnw spring-boot:run
+```
+
+**Windows (cmd / PowerShell):**
+
+```bat
+mvnw.cmd spring-boot:run
 ```
 
 Poi apri **http://localhost:8080/** per la UI.
@@ -41,9 +52,12 @@ Poi apri **http://localhost:8080/** per la UI.
 Build del jar eseguibile:
 
 ```bash
-mvn clean package
+./mvnw clean package        # Windows: mvnw.cmd clean package
 java -jar target/oracle-bench.jar
 ```
+
+> In alternativa, se hai già Maven installato, funzionano anche i comandi
+> `mvn spring-boot:run` / `mvn clean package`.
 
 ## Configurazione — `src/main/resources/application.yml`
 

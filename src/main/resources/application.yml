@@ -7,8 +7,8 @@ spring:
 
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
-    username: tuner
-    password: Corso2026#
+    username: corso
+    password: Corso2026
     driver-class-name: oracle.jdbc.OracleDriver
     hikari:
       pool-name: oracle-bench-pool
